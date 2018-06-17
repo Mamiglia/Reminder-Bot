@@ -4,13 +4,12 @@ import time
 import redis
 dat = sqlite3.connect("dat.db")
 d = dat.cursor()
-d.execute("DROP TABLE remind")
 d.execute('CREATE TABLE IF NOT EXISTS user (userid INTEGER PRIMARY KEY, timezone INTEGER)')
 d.execute("CREATE TABLE IF NOT EXISTS remind (userid INTEGER, mesid INTEGER, tim INTEGER)")
 dat.commit()
 bot = botogram.create('')
 bot.about = "I AM THE GREAT REMINDERMASTER, with my 512Kb of memory I can Remember ANYTHING you desire, I am at your service, just push /remind"
-bot.owner = "@Mamiglia"
+bot.owner = "@Mamiglia @ferraririccardo"
 
 r = redis.StrictRedis(host='localhost', port=6379, db=0, decode_responses=True)
 
@@ -33,7 +32,8 @@ def start(chat, message):
 
 
 @bot.command("remind")
-def reminder_start(chat, message):
+def reminder_start(chat, args, message):
+    """ This command allow you to remind something new """
     if chat.type == 'private':
         bt = botogram.Buttons()
         bt[0].callback('Cancel the Remind', 'cancel')
