@@ -1,11 +1,16 @@
 import botogram
 import sqlite3
-import time
+from datetime import datetime
+from datetime import timedelta
 import redis
+import json
+from dateutil import parser
 dat = sqlite3.connect("dat.db")
 d = dat.cursor()
-d.execute('CREATE TABLE IF NOT EXISTS user (userid INTEGER PRIMARY KEY, timezone INTEGER)')
-d.execute("CREATE TABLE IF NOT EXISTS remind (userid INTEGER, mesid INTEGER, tim INTEGER)")
+# d.execute('DROP TABLE IF EXISTS users')
+# d.execute('DROP TABLE IF EXISTS remind')
+d.execute('CREATE TABLE IF NOT EXISTS users (userid INTEGER PRIMARY KEY, timezone INTEGER, DST INTEGER)')
+d.execute("CREATE TABLE IF NOT EXISTS remind (userid INTEGER, mesid INTEGER, tim DATE)")
 dat.commit()
 bot = botogram.create('')
 bot.about = "I AM THE GREAT REMINDERMASTER, with my 512Kb of memory I can Remember ANYTHING you desire, I am at your service, just push /remind"
@@ -25,10 +30,18 @@ def final_question(cht, t):
 
 @bot.command('start')
 def start(chat, message):
-    chat.send('welcome message')
-    d.execute('INSERT INTO users (userid) VALUES (?)', (message.sender.id, ))
-    dat.commit()
-    # TODO ask timezone, check if user already in db
+    if chat.type == 'private':
+        chat.send('TODO welcome message')
+        d.execute("SELECT userid FROM users")
+        if d.fetchone() is None or message.sender.id not in d.fetchone():
+            choose_continent(chat)
+
+
+@bot.command('cancel')
+def cancel_remind(chat, message):
+    if chat.type == 'private':
+        chat.send('Remind Canceled')
+        r.delete(chat.id)
 
 
 @bot.command("remind")
@@ -52,35 +65,35 @@ def stager(chat, message):
         except TypeError:
             chat.send('Press /remind to start the magiccc')
             return
+        except ValueError:
+            timezone_set(chat, message)
+            return
         if stage == 1:
             r.hset(chat.id, 'mesid', message.id)
             bt = botogram.Buttons()
             bt[0].callback('Cancel', 'cancel')
-            bt[1].callback('1 Day', 'timeadd', str(86400))
-            bt[1].callback('1 Hour', 'timeadd', str(3600))
-            bt[1].callback('10 min', 'timeadd', str(600))
-            chat.send("When are you interested in remembering this?\nYou can send me date in this format DD/MM/YY or just the minuetes", attach=bt)
+            bt[1].callback('1 Day', 'timeadd', str(1440))
+            bt[1].callback('1 Hour', 'timeadd', str(60))
+            bt[1].callback('10 min', 'timeadd', str(10))
+            bt[1].callback('5 min', 'timeadd', str(5))
+            # TODO add support to dates composed by only minutes
+            chat.send("When are you interested in remembering this?\nYou can send me date in this format DD/MM/YY or just the minutes", attach=bt)
             r.hincrby(chat.id, 'stage')
+            # TODO delete old buttons here and below
         elif stage == 2:
             text = message.text
             try:
-                if '/' in text and ':' in text:
-                    t = time.mktime(time.strptime(text, "%d/%m/%y %H:%M"))
-                elif ':' in text:
-                    temp = time.strftime('%d/%m/%y ') + text
-                    t = time.mktime(time.strptime(temp, "%d/%m/%y %H:%M"))
-                elif '/' in text:
-                    t = time.mktime(time.strptime(text, "%d/%m/%y"))
-                else:
-                    t = time.time() + (60 * int(text))
-                # FIX support to timezone is missing
+                t = parser.parse(text)
             except ValueError:
-                chat.send('Incorrect format, retry')
+                chat.send('Invalid input')
+                return
+            d.execute('SELECT DST, timezone FROM users WHERE userid=?', (chat.id, ))
+            tz = d.fetchone()
+            t = t - timedelta(minutes=(tz[0]+tz[1]))
+            if t > datetime.utcnow():
+                final_question(chat, t)
             else:
-                if t - time.time() > 0:
-                    final_question(chat, t)
-                else:
-                    chat.send('I can\'t send messages in the past, I\'m not enough powerful\nChoose another date')
+                chat.send('I can\'t send messages in the past, I\'m not enough powerful\nChoose another date')
 
 
 @bot.callback('cancel')
@@ -101,8 +114,73 @@ def confirm(chat, message):
 @bot.callback('timeadd')
 def timeadd(chat, message, data):
     message.edit(message.text)
-    t = time.time() + int(data)
+    t = datetime.now() + timedelta(minutes=int(data))
     final_question(chat, t)
+
+
+@bot.callback('choose_continent')
+def choose_continent(chat):
+    bt = botogram.Buttons()
+    bt[0].callback('Europe', 'continents', 'europe')
+    bt[1].callback('America', 'continents', 'america')
+    bt[2].callback('Asia', 'continents', 'asia')
+    bt[3].callback('Africa', 'continents', 'africa')
+    bt[4].callback('Oceania', 'continents', 'oceania')
+    chat.send('Select Your continent (no polar bears accepted)', attach=bt)
+
+
+@bot.callback('continents')
+def continent_set(message, chat, data):
+    message.edit(message.text)
+    if data == 'europe':
+        button = [["+0", "+1"], ["+2", "+3", "+4"]]
+    elif data == 'asia':
+        button = [["+2", '+3', '+3:30'], ['+4', '+4:30', '+5'], ['+5:30', '+6', '+7'], ['+8', '+9', '+10', '+11', '+12']]
+    elif data == 'oceania':
+        button = [['+8', '+9', '+10', '+11'], ['+12', '+13', '-11', '-10']]
+    elif data == 'africa':
+        button = [['+0', '+1'], ['+2', '+3']]
+    elif data == 'america':
+        button = [['-9', '-8', '-7'], ['-6', '-5', '-4', '-3']]
+    r.hset(chat.id, 'stage', 'tz')
+    bot.api.call('sendMessage', {
+        'chat_id': chat.id,
+        'text': 'Select your Timezone',
+        "disable_web_page_preview": True,
+        'parse_mode': 'Markdown',
+        'reply_markup': json.dumps({"keyboard": button})
+        })
+
+
+@bot.callback('timezone')
+def timezone_set(chat, message):
+    try:
+        d.execute('INSERT INTO users (userid, timezone) VALUES (?,?)', (chat.id, int(message.text) * 60))
+        dat.commit()
+    except ValueError:
+        dat.rollback()
+        x = float(message.text[1]) + (float(message.text[3:5]) / 60)
+        d.execute('INSERT INTO users (userid, timezone) VALUES (?,?)', (chat.id, int(x * 60)))
+        dat.commit()
+    r.delete(chat.id)
+    bot.api.call('sendMessage', {
+        'chat_id': chat.id,
+        'text': 'Timezone correctly set',
+        'parse_mode': 'HTML',
+        'reply_markup': json.dumps({"remove_keyboard": True})
+        })
+    bt = botogram.Buttons()
+    bt[0].callback('Yes', 'DST', '1')
+    bt[0].callback('No', 'DST', '0')
+    chat.send('Is DST active where you live?', attach=bt)
+
+
+@bot.callback('DST')
+def DST_set(chat, message, data):
+    message.edit(message.text)
+    d.execute('UPDATE users SET DST=? WHERE userid=?', (int(data) * 60, chat.id))
+    dat.commit()
+    chat.send('Everything is correctly set!\nYou can now start using the bot by pressing /remind')
 
 
 @bot.timer(60)
@@ -110,7 +188,7 @@ def check_rem():
     d.execute('SELECT * FROM remind')
     reminds = d.fetchall()
     for z in reminds:
-        if z[2] <= time.time():
+        if datetime.strptime(z[2], "%Y-%m-%d %H:%M:%S") <= datetime.utcnow():
             bot.api.call("forwardMessage", {"chat_id": z[0], "message_id": z[1], "from_chat_id": z[0]})
             d.execute('DELETE FROM remind WHERE userid=? AND mesid=?', (z[0], z[1]))
             dat.commit()
