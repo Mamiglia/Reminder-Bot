@@ -6,6 +6,7 @@ import json
 from dateutil import parser
 dat = sqlite3.connect("dat.db")
 d = dat.cursor()
+# to delete in final version
 # d.execute('DROP TABLE IF EXISTS users')
 # d.execute('DROP TABLE IF EXISTS remind')
 d.execute('CREATE TABLE IF NOT EXISTS users (userid INTEGER PRIMARY KEY, timezone INTEGER, DST INTEGER DEFAULT 0)')
@@ -30,9 +31,10 @@ def final_question(cht, t, pretty):
 @bot.command('start')
 def start(chat, message):
     if chat.type == 'private':
-        chat.send('TODO welcome message')
+        chat.send('Welcome in Reminderus, this powerful bot allows you to register reminds that I will send you in the future, as first thing set up your timezone')
         d.execute("SELECT userid FROM users")
-        if d.fetchone() is None or message.sender.id not in d.fetchone():
+        x = d.fetchone()
+        if x is None or message.sender.id not in x:
             choose_continent(chat)
 
 
@@ -40,6 +42,13 @@ def start(chat, message):
 def list(chat, message):
     if chat.type == 'private':
         d.execute('SELECT * FROM remind WHERE userid=?', (chat.id, ))
+        # TODO list and options
+
+
+@bot.command('settings')
+def settings(chat, message):
+    pass
+    # TODO setting command
 
 
 @bot.command('cancel')
