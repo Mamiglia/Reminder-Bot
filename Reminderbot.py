@@ -10,7 +10,7 @@ d = dat.cursor()
 # d.execute('DROP TABLE IF EXISTS users')
 # d.execute('DROP TABLE IF EXISTS remind')
 d.execute('CREATE TABLE IF NOT EXISTS users (userid INTEGER PRIMARY KEY, timezone INTEGER, DST INTEGER DEFAULT 0)')
-d.execute("CREATE TABLE IF NOT EXISTS remind (userid INTEGER, mesid INTEGER, tim DATE)")
+d.execute("CREATE TABLE IF NOT EXISTS remind (userid INTEGER, mesid INTEGER, tim DATE, preview TEXT)")
 dat.commit()
 bot = botogram.create('')
 bot.about = "I AM THE GREAT REMINDERUS, with my 512Kb of memory I can Remember ANYTHING you desire, I am at your service, just push /remind"
@@ -42,7 +42,14 @@ def start(chat, message):
 def list(chat, message):
     if chat.type == 'private':
         d.execute('SELECT * FROM remind WHERE userid=?', (chat.id, ))
-        # TODO list and options
+        reminds = d.fetchone()
+        if reminds is None:
+            chat.send('No reminds at the moment, press /remind!')
+        else:
+            bt = botogram.Buttons()
+            for remind in reminds:
+                bt[0].callback(remind[3], 'change_set_remind', remind[1])
+                chat.send('These are your active reminds', attach=bt)
 
 
 @bot.command('settings')
@@ -65,10 +72,9 @@ def reminder_start(chat, args, message):
     """ This command allow you to remind something new """
     if chat.type == 'private':
         d.execute('SELECT timezone FROM users WHERE userid=?', (chat.id, ))
-        if d.fetchone() is None:
+        if d.fetchone() is None:  # check if timezone is set
             chat.send('You still haven\'t set timezone and DST, press /start!')
             return
-        # check if timezone is set
         bt = botogram.Buttons()
         bt[0].callback('Cancel the Remind', 'cancel')
         if r.hsetnx(chat.id, 'stage', 1) == 1:
@@ -90,8 +96,29 @@ def stager(chat, message):
             timezone_set(chat, message)
             return
         if stage == 1:
-            bot.edit_message(message.message_id - 1, "Now, Send me the task that you need to remember")
-            r.hset(chat.id, 'mesid', message.id)
+            bot.edit_message(message.message_id - 1, "Now, Send me the task that you need to remember")  # delete old buttons
+            r.hset(chat.id, 'mesid', message.message_id)
+            if message.text is None:
+                if message.photo:
+                    r.hset(chat.id, 'preview', '🏞 photo')
+                elif message.video:
+                    r.hset(chat.id, 'preview', '🎬 video')
+                elif message.voice:
+                    r.hset(chat.id, 'preview', '🎵 voice')
+                elif message.audio:
+                    r.hset(chat.id, 'preview', '🔈 audio')
+                elif message.location:
+                    r.hset(chat.id, 'preview', '🛣 location')
+                elif message.contact:
+                    r.hset(chat.id, 'preview', '🤵🏻 contact')
+                elif message.document:
+                    r.hset(chat.id, 'preview', '📄 document')
+                else:
+                    r.hset(chat.id, 'preview', 'Unable to generate preview')
+            elif len(message.text) < 10:
+                r.hset(chat.id, 'preview', (message.text[:len(message.text):]))
+            else:
+                r.hset(chat.id, 'preview', (message.text[:9:] + '...'))
             bt = botogram.Buttons()
             bt[1].callback('1 Day', 'timeadd', str(1440))
             bt[1].callback('1 Hour', 'timeadd', str(60))
@@ -99,7 +126,6 @@ def stager(chat, message):
             bt[1].callback('5 min', 'timeadd', str(5))
             chat.send("When are you interested in remembering this?\nYou can send me in how many minutes or the date in any format", attach=bt)
             r.hincrby(chat.id, 'stage')
-            # TODO delete old buttons here and below
         elif stage == 2:
             text = message.text
             if len(text) < 4:
@@ -134,7 +160,7 @@ def cancel(chat, message):
 def confirm(chat, message):
     message.edit('Your wish is granted')
     rem = r.hgetall(chat.id)
-    d.execute('INSERT INTO remind (userid, mesid, tim) VALUES (?,?,?)', (rem['userid'], rem['mesid'], rem['time']))
+    d.execute('INSERT INTO remind (userid, mesid, tim, preview) VALUES (?,?,?,?)', (rem['userid'], rem['mesid'], rem['time'], rem['preview']))
     dat.commit()
     r.delete(chat.id)
 
