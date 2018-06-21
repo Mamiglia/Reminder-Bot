@@ -28,6 +28,15 @@ def final_question(cht, t, pretty):
     cht.send('Do you really want me to remind you this %s?' % (pretty), attach=bt)
 
 
+def date_set(chat):
+    bt = botogram.Buttons()
+    bt[1].callback('1 Day', 'timeadd', str(1440))
+    bt[1].callback('1 Hour', 'timeadd', str(60))
+    bt[1].callback('10 min', 'timeadd', str(10))
+    bt[1].callback('5 min', 'timeadd', str(5))
+    chat.send("When are you interested in remembering this?\nYou can send me in how many minutes or the date in any format", attach=bt)
+
+
 @bot.command('start')
 def start(chat, message):
     if chat.type == 'private':
@@ -39,7 +48,7 @@ def start(chat, message):
 
 
 @bot.command('list')
-def list(chat, message):
+def list_reminds(chat):
     if chat.type == 'private':
         d.execute('SELECT * FROM remind WHERE userid=?', (chat.id, ))
         reminds = d.fetchone()
@@ -47,9 +56,45 @@ def list(chat, message):
             chat.send('No reminds at the moment, press /remind!')
         else:
             bt = botogram.Buttons()
-            for remind in reminds:
-                bt[0].callback(remind[3], 'change_set_remind', remind[1])
-                chat.send('These are your active reminds', attach=bt)
+            for x, remind in enumerate(reminds):
+                bt[x].callback(remind[3], 'change_set_remind', json.dumps(remind))
+            chat.send('These are your active reminds', attach=bt)
+
+
+@bot.callback('change_set_remind')
+def setting_rem(chat, message, data):
+    remind = json.loads(data)
+    bt = botogram.Buttons()
+    bt[0].callback('Delete', 'delete', data)
+    bt[0].callback('What was this?', 'send_rem', data)  # to improve phrase?
+    bt[1].callback('Change remind date', 'change_date', data)
+    bt[2].callback('Back', 'list_redirect')
+    # bt[1].callback('Upload to cloud calendar', 'gupload')
+    message.edit('Choose what to do with the remind "%s" that will be displayed in %s minutes' % (remind[3], round((datetime.strptime(remind[2], "%Y-%m-%d %H:%M:%S.%f") - datetime.utcnow()).total_seconds / 60)), attach=bt)
+    # that really complicated thing up there (the one inside the round() brackets) is just the simpliest way to know th number of minutes left before that the remind is triggered
+
+
+@bot.callback('change_date')
+def change_date(data, chat):
+    remind = json.loads(data)
+    r.hset(chat.id, 'stage', 2)
+    r.hset(chat.id, 'userid', chat.id)
+    r.hset(chat.id, 'mesid', remind[1])
+    date_set(chat)
+
+
+@bot.callback('delete')
+def delete_remind(chat, message, data):
+    remind = json.loads(data)
+    d.execute('DELETE FROM remind WHERE userid=? AND mesid=?', (remind[0], remind[1]))
+    dat.commit()
+    message.edit('Remind succesfully deleted, you won\'t receive it\nWanna /list again?')
+
+
+@bot.callback('list_redirect')
+def list_redirect(message, chat):
+    message.delete()
+    list_reminds(chat)
 
 
 @bot.command('settings')
@@ -96,7 +141,7 @@ def stager(chat, message):
             timezone_set(chat, message)
             return
         if stage == 1:
-            bot.edit_message(message.message_id - 1, "Now, Send me the task that you need to remember")  # delete old buttons
+            bot.edit_message(chat.id, message.message_id - 1, "Now, Send me the task that you need to remember")  # delete old buttons
             r.hset(chat.id, 'mesid', message.message_id)
             if message.text is None:
                 if message.photo:
@@ -119,12 +164,7 @@ def stager(chat, message):
                 r.hset(chat.id, 'preview', (message.text[:len(message.text):]))
             else:
                 r.hset(chat.id, 'preview', (message.text[:9:] + '...'))
-            bt = botogram.Buttons()
-            bt[1].callback('1 Day', 'timeadd', str(1440))
-            bt[1].callback('1 Hour', 'timeadd', str(60))
-            bt[1].callback('10 min', 'timeadd', str(10))
-            bt[1].callback('5 min', 'timeadd', str(5))
-            chat.send("When are you interested in remembering this?\nYou can send me in how many minutes or the date in any format", attach=bt)
+                date_set(chat)
             r.hincrby(chat.id, 'stage')
         elif stage == 2:
             text = message.text
@@ -144,10 +184,10 @@ def stager(chat, message):
                 t = t - timedelta(minutes=(tz[0]+tz[1]))
             if t > datetime.utcnow():
                 final_question(chat, t, pretty)
-                bot.edit_message(message.message_id - 1, "Ok, you selected %s" % (pretty))
+                bot.edit_message(chat.id, message.message_id - 1, "Ok, you selected %s" % (pretty))
             else:
                 chat.send('I can\'t send messages in the past, I\'m not enough powerful\nChoose another date')
-                bot.edit_message(message.message_id - 1, "Invalid Input, retry")
+                bot.edit_message(chat.id, message.message_id - 1, "Invalid Input, retry")
 
 
 @bot.callback('cancel')
