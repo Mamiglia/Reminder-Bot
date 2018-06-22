@@ -28,13 +28,13 @@ def final_question(cht, t, pretty):
     cht.send('Do you really want me to remind you this %s?' % (pretty), attach=bt)
 
 
-def date_set(chat):
+def date_set(cht):
     bt = botogram.Buttons()
     bt[1].callback('1 Day', 'timeadd', str(1440))
     bt[1].callback('1 Hour', 'timeadd', str(60))
     bt[1].callback('10 min', 'timeadd', str(10))
     bt[1].callback('5 min', 'timeadd', str(5))
-    chat.send("When are you interested in remembering this?\nYou can send me in how many minutes or the date in any format", attach=bt)
+    cht.send("When are you interested in remembering this?\nYou can send me in how many minutes or the date in any format", attach=bt)
 
 
 @bot.command('start')
@@ -51,42 +51,54 @@ def start(chat, message):
 def list_reminds(chat):
     if chat.type == 'private':
         d.execute('SELECT * FROM remind WHERE userid=?', (chat.id, ))
-        reminds = d.fetchone()
-        if reminds is None:
+        reminds = d.fetchall()
+        if reminds is []:
             chat.send('No reminds at the moment, press /remind!')
         else:
             bt = botogram.Buttons()
             for x, remind in enumerate(reminds):
-                bt[x].callback(remind[3], 'change_set_remind', json.dumps(remind))
+                bt[x].callback(remind[3], 'change_set_remind', str(remind[1]))
             chat.send('These are your active reminds', attach=bt)
 
 
 @bot.callback('change_set_remind')
 def setting_rem(chat, message, data):
-    remind = json.loads(data)
+    d.execute('SELECT * FROM remind WHERE userid=? AND mesid=?', (chat.id, int(data)))
+    remind = d.fetchone()
     bt = botogram.Buttons()
     bt[0].callback('Delete', 'delete', data)
-    bt[0].callback('What was this?', 'send_rem', data)  # to improve phrase?
-    bt[1].callback('Change remind date', 'change_date', data)
+    bt[0].callback('What was this?', 'send_rem', str(remind[1]))  # to improve phrase?
+    bt[1].callback('Change remind date', 'change_date', json.dumps([remind[1], remind[3]]))
     bt[2].callback('Back', 'list_redirect')
     # bt[1].callback('Upload to cloud calendar', 'gupload')
-    message.edit('Choose what to do with the remind "%s" that will be displayed in %s minutes' % (remind[3], round((datetime.strptime(remind[2], "%Y-%m-%d %H:%M:%S.%f") - datetime.utcnow()).total_seconds / 60)), attach=bt)
+    message.edit('Choose what to do with the remind "%s" that will be displayed in %s minutes' % (remind[3], round((datetime.strptime(remind[2], "%Y-%m-%d %H:%M:%S.%f") - datetime.utcnow()).total_seconds() / 60)), attach=bt)
     # that really complicated thing up there (the one inside the round() brackets) is just the simpliest way to know th number of minutes left before that the remind is triggered
 
 
+@bot.callback('send_rem')
+def send_reminder(chat, message, data):
+    message.edit(message.text)
+    remind = int(data)
+    bot.api.call("forwardMessage", {"chat_id": chat.id, "message_id": remind, "from_chat_id": chat.id})
+    chat.send('Wanna /list again?')
+
+
 @bot.callback('change_date')
-def change_date(data, chat):
-    remind = json.loads(data)
+def change_date(data, chat, message):
+    x = json.loads(data)
+    d.execute('DELETE FROM remind WHERE userid=? AND mesid=?', (chat.id, x[0]))
+    dat.commit()
+    message.edit(message.text)
     r.hset(chat.id, 'stage', 2)
     r.hset(chat.id, 'userid', chat.id)
-    r.hset(chat.id, 'mesid', remind[1])
+    r.hset(chat.id, 'mesid', x[0])
+    r.hset(chat.id, 'preview', x[1])
     date_set(chat)
 
 
 @bot.callback('delete')
 def delete_remind(chat, message, data):
-    remind = json.loads(data)
-    d.execute('DELETE FROM remind WHERE userid=? AND mesid=?', (remind[0], remind[1]))
+    d.execute('DELETE FROM remind WHERE userid=? AND mesid=?', (chat.id, int(data)))
     dat.commit()
     message.edit('Remind succesfully deleted, you won\'t receive it\nWanna /list again?')
 
@@ -164,7 +176,7 @@ def stager(chat, message):
                 r.hset(chat.id, 'preview', (message.text[:len(message.text):]))
             else:
                 r.hset(chat.id, 'preview', (message.text[:9:] + '...'))
-                date_set(chat)
+            date_set(chat)
             r.hincrby(chat.id, 'stage')
         elif stage == 2:
             text = message.text
