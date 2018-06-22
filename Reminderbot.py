@@ -111,8 +111,16 @@ def list_redirect(message, chat):
 
 @bot.command('settings')
 def settings(chat, message):
-    pass
-    # TODO setting command
+    if chat.type == 'private':
+        d.execute('SELECT timezone, DST FROM users WHERE userid=?', (chat.id, ))
+        z = d.fetchone()
+        bt = botogram.Buttons()
+        bt[0].callback('Timezone: %s' % (z[0] / 60), 'timezone_hook')
+        if z[1] == 1:
+            bt[0].callback('DST: On', 'dst_change', True)
+        elif z[1] == 0:
+            bt[0].callback('DST: Off', 'dst_change', False)
+        chat.send('Welcome in settings, what can i do for you?', attach=bt)
 
 
 @bot.command('cancel')
@@ -279,7 +287,7 @@ def timezone_set(chat, message):
     bt = botogram.Buttons()
     bt[0].callback('Yes', 'DST', '1')
     bt[0].callback('No', 'DST', '0')
-    chat.send('Is DST active where you live?', attach=bt)
+    chat.send('Is [DST](https://en.wikipedia.org/wiki/Daylight_saving_time) active where you live?\nDST is the daylight saving time,which means +1 hour in some countries during summer', attach=bt)
 
 
 @bot.callback('DST')
