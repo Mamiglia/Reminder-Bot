@@ -116,11 +116,33 @@ def settings(chat, message):
         z = d.fetchone()
         bt = botogram.Buttons()
         bt[0].callback('Timezone: %s' % (z[0] / 60), 'timezone_hook')
-        if z[1] == 1:
-            bt[0].callback('DST: On', 'dst_change', True)
+        if z[1] == 60:
+            bt[0].callback('DST: On', 'dst_change', 'on')
         elif z[1] == 0:
-            bt[0].callback('DST: Off', 'dst_change', False)
+            bt[0].callback('DST: Off', 'dst_change', 'off')  # hate this callbacks without boolean
         chat.send('Welcome in settings, what can i do for you?', attach=bt)
+
+
+@bot.callback('dst_change')
+def dst_change(data, chat, message):
+    d.execute('SELECT timezone FROM users WHERE userid=?', (chat.id, ))
+    bt = botogram.Buttons()
+    bt[0].callback('Timezone: %s' % (d.fetchone()[0] / 60), 'timezone_hook')
+    if data == 'on':
+        d.execute('UPDATE users SET DST=? WHERE userid=?', (0, chat.id))
+        bt[0].callback('DST: Off', 'dst_change', 'off')
+    else:
+        d.execute('UPDATE users SET DST=? WHERE userid=?', (60, chat.id))
+        bt[0].callback('DST: On', 'dst_change', 'on')
+    dat.commit()
+    message.edit('Welcome in settings, what can i do for you?', attach=bt)
+
+
+@bot.callback('timezone_hook')
+def timezone_hook(chat):
+    d.execute('DELETE FROM users WHERE userid=?', (chat.id, ))
+    dat.commit()
+    choose_continent(chat)
 
 
 @bot.command('cancel')
@@ -228,7 +250,7 @@ def confirm(chat, message):
 @bot.callback('timeadd')
 def timeadd(chat, message, data):
     message.edit(message.text)
-    t = datetime.now() + timedelta(minutes=int(data))
+    t = datetime.utcnow() + timedelta(minutes=int(data))
     pretty = "in %s minutes" % (data)
     final_question(chat, t, pretty)
 
@@ -287,7 +309,7 @@ def timezone_set(chat, message):
     bt = botogram.Buttons()
     bt[0].callback('Yes', 'DST', '1')
     bt[0].callback('No', 'DST', '0')
-    chat.send('Is [DST](https://en.wikipedia.org/wiki/Daylight_saving_time) active where you live?\nDST is the daylight saving time,which means +1 hour in some countries during summer', attach=bt)
+    chat.send('Is [DST](https://en.wikipedia.org/wiki/Daylight_saving_time) active where you live?\nDST is the daylight saving time,which means +1 hour in some countries during summer', attach=bt, syntax='markdown')
 
 
 @bot.callback('DST')
